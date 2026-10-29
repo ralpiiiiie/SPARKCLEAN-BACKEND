@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sparkclean-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sparkclean
+      POSTGRES_PASSWORD: sparkclean
+      POSTGRES_DB: sparkclean
+    ports:
+      - "5433:5432"
+    volumes:
+      - sparkclean_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sparkclean -d sparkclean"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sparkclean_pgdata:
