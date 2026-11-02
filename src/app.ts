@@ -8,6 +8,8 @@ import { env } from "./config/env.js";
 import { pool } from "./db/client.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { notFound } from "./middleware/notFound.js";
+import { authRouter } from "./modules/auth/routes.js";
+import { aiRouter } from "./modules/ai/routes.js";
 import { branchesRouter } from "./modules/branches/routes.js";
 import { plantsRouter } from "./modules/plants/routes.js";
 import { servicesRouter } from "./modules/services/routes.js";
@@ -78,6 +80,8 @@ api.get("/health", async (_req, res) => {
   }
 });
 
+api.use("/auth", authRouter);
+api.use("/ai", aiRouter);
 api.use("/dashboard", dashboardRouter);
 api.use("/branches", branchesRouter);
 api.use("/plants", plantsRouter);

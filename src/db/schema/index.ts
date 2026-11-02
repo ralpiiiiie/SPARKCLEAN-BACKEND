@@ -542,6 +542,60 @@ export const baReports = pgTable("ba_reports", {
 
 /* ── Relations ── */
 
+export const adminRoleEnum = pgEnum("admin_role", ["admin", "analyst"]);
+
+export const adminUsers = pgTable("admin_users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  role: adminRoleEnum("role").notNull().default("analyst"),
+  ...timestamps,
+}, (t) => [index("admin_users_email_idx").on(t.email)]);
+
+export const chatConversations = pgTable(
+  "chat_conversations",
+  {
+    id: serial("id").primaryKey(),
+    adminId: integer("admin_id")
+      .notNull()
+      .references(() => adminUsers.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("New conversation"),
+    ...timestamps,
+  },
+  (t) => [index("chat_conversations_admin_idx").on(t.adminId)],
+);
+
+export const chatMessages = pgTable(
+  "chat_messages",
+  {
+    id: serial("id").primaryKey(),
+    conversationId: integer("conversation_id")
+      .notNull()
+      .references(() => chatConversations.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    content: jsonb("content").notNull(),
+    ...timestamps,
+  },
+  (t) => [index("chat_messages_conversation_idx").on(t.conversationId)],
+);
+
+export const adminUsersRelations = relations(adminUsers, ({ many }) => ({
+  conversations: many(chatConversations),
+}));
+
+export const chatConversationsRelations = relations(chatConversations, ({ one, many }) => ({
+  admin: one(adminUsers, { fields: [chatConversations.adminId], references: [adminUsers.id] }),
+  messages: many(chatMessages),
+}));
+
+export const chatMessagesRelations = relations(chatMessages, ({ one }) => ({
+  conversation: one(chatConversations, {
+    fields: [chatMessages.conversationId],
+    references: [chatConversations.id],
+  }),
+}));
+
 export const branchesRelations = relations(branches, ({ many }) => ({
   customers: many(customers),
   orders: many(orders),

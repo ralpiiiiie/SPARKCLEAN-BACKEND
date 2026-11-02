@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
+import bcrypt from "bcryptjs";
 import { db, pool } from "../client.js";
 import { env } from "../../config/env.js";
 import {
+  adminUsers,
   analystNotes,
   appSettings,
   baProcedureRuns,
@@ -10,6 +12,8 @@ import {
   baReports,
   branchMonthlyDemand,
   branches,
+  chatConversations,
+  chatMessages,
   costAssumptions,
   customers,
   deliveryCosts,
@@ -34,6 +38,9 @@ import { buildScenarioPlan, latestDemandByBranch } from "../../analytics/scenari
 import { buildRecommendations } from "../../analytics/recommendations.js";
 
 const TABLES = [
+  "chat_messages",
+  "chat_conversations",
+  "admin_users",
   "ba_reports",
   "ba_recommendations",
   "ba_procedure_steps",
@@ -80,6 +87,22 @@ async function main(): Promise<void> {
   const data = generateMockData();
 
   await db.execute(sql.raw(`TRUNCATE TABLE ${TABLES.map((t) => `"${t}"`).join(", ")} RESTART IDENTITY CASCADE`));
+
+  // Default administrator for the AI assistant. Override with ADMIN_SEED_* env vars.
+  const adminEmail = (process.env.ADMIN_SEED_EMAIL ?? "admin@sparkclean.com").toLowerCase();
+  const adminPassword = process.env.ADMIN_SEED_PASSWORD ?? "SparkClean2024!";
+  if (env.NODE_ENV === "production" && !process.env.ADMIN_SEED_PASSWORD) {
+    console.warn(
+      "WARNING: seeding the default demo password in production. Set ADMIN_SEED_PASSWORD (and change it after first login).",
+    );
+  }
+  await db.insert(adminUsers).values({
+    username: "Admin User",
+    email: adminEmail,
+    passwordHash: await bcrypt.hash(adminPassword, 10),
+    role: "admin",
+  });
+  console.log(`Admin account ready: ${adminEmail}`);
 
   const branchId = new Map(data.branches.map((b) => [b.name, b.id]));
   const plantId = new Map(data.plants.map((p) => [p.name, p.id]));
