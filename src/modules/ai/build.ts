@@ -425,18 +425,21 @@ async function buildCompletion(intent: ParsedIntent, bounds: DataBounds): Promis
 /* ───────────────────────────── pending ───────────────────────────── */
 
 async function buildPending(intent: ParsedIntent, bounds: DataBounds): Promise<BuiltResponse> {
-  const pending = await pendingFacts();
+  const pending = await pendingFacts(intent.branchId);
   const total = pending.inFlight;
 
   return {
     facts: {
       asOfDate: bounds.max,
+      branch: intent.branchName,
       received: pending.received,
       washing: pending.washing,
       ready: pending.ready,
       inFlight: total,
       oldestPendingDate: pending.oldestPendingDate,
-      note: "Open orders across the whole business (all branches): Received, Washing and Ready.",
+      note: intent.branchId
+        ? "Open orders for this branch only: Received, Washing and Ready."
+        : "Open orders across the whole business (all branches): Received, Washing and Ready.",
     },
     kpis: [
       { label: "Open orders", value: total, format: "number", caption: `as of ${bounds.max}` },
@@ -472,7 +475,9 @@ async function buildPending(intent: ParsedIntent, bounds: DataBounds): Promise<B
     },
     range: null,
     fallbackNarrative:
-      `There are currently ${num(total)} open orders: ${num(pending.received)} received, ${num(pending.washing)} in washing and ${num(pending.ready)} ready for pickup.` +
+      `There are currently ${num(total)} open orders` +
+      (intent.branchName ? ` at the ${intent.branchName} branch` : "") +
+      `: ${num(pending.received)} received, ${num(pending.washing)} in washing and ${num(pending.ready)} ready for pickup.` +
       (pending.oldestPendingDate
         ? ` The oldest open order dates back to ${pending.oldestPendingDate}, so it may be worth prioritising.`
         : ""),
@@ -484,10 +489,12 @@ async function buildPending(intent: ParsedIntent, bounds: DataBounds): Promise<B
 /* ───────────────────────────── customers ───────────────────────────── */
 
 async function buildCustomers(intent: ParsedIntent, bounds: DataBounds): Promise<BuiltResponse> {
-  const facts = await customerFacts({ range: intent.range, bounds, topLimit: 6 });
+  const facts = await customerFacts({ range: intent.range, bounds, branchId: intent.branchId, topLimit: 6 });
+  const subject = intent.branchName ? `The ${intent.branchName} branch` : "The business";
 
   return {
     facts: {
+      branch: intent.branchName,
       totalCustomers: facts.totalCustomers,
       activeCustomers: facts.activeCustomers,
       repeatCustomers: facts.repeatCustomers,
@@ -532,7 +539,7 @@ async function buildCustomers(intent: ParsedIntent, bounds: DataBounds): Promise
     },
     range: { start: intent.range.start, end: intent.range.end, label: rangeLabel(intent.range.start, intent.range.end), note: rangeNote(intent, bounds) },
     fallbackNarrative:
-      `The business has ${num(facts.totalCustomers)} customers, of whom ${num(facts.activeCustomers)} ordered in the selected period. ` +
+      `${subject} has ${num(facts.totalCustomers)} customers, of whom ${num(facts.activeCustomers)} ordered in the selected period. ` +
       `${num(facts.repeatCustomers)} are repeat customers (${pct(facts.repeatRate)} repeat rate) and ${num(facts.dormantCustomers)} have not ordered since ${facts.dormantCutoff}. ` +
       (facts.topCustomers[0]
         ? `The most frequent customer is ${facts.topCustomers[0].name} with ${num(facts.topCustomers[0].orders)} orders.`
@@ -608,17 +615,24 @@ async function buildServices(intent: ParsedIntent, bounds: DataBounds): Promise<
 /* ───────────────────────────── branches ───────────────────────────── */
 
 async function buildBranches(intent: ParsedIntent, bounds: DataBounds): Promise<BuiltResponse> {
-  const analysis = await analyzeRange({ ...intent.range, branchId: null });
+  // A branch manager is forced to a single id by the service; admins may name
+  // two or more branches explicitly, otherwise every branch is compared.
+  const branchFilter = intent.branchIds.length ? intent.branchIds : null;
+  const analysis = await analyzeRange({ ...intent.range, branchIds: branchFilter });
   const rows = analysis.branches;
   const top = rows[0] ?? null;
   const label = rangeLabel(analysis.range.start, analysis.range.end);
+  const singleBranch = branchFilter?.length === 1;
 
   return {
     facts: {
       range: { start: analysis.range.start, end: analysis.range.end, label },
       branches: rows.map((b) => ({ name: b.name, orders: b.orders, revenue: b.revenue, aov: b.aov, sharePct: Number(b.sharePct.toFixed(1)) })),
       topBranch: top,
-      note: "All branches are included; revenue excludes Cancelled orders.",
+      branchesIncluded: branchFilter?.length ?? "all",
+      note: singleBranch
+        ? "This report covers one branch only; revenue excludes Cancelled orders."
+        : "All branches are included; revenue excludes Cancelled orders.",
     },
     kpis: [
       { label: "Top branch", value: top?.revenue ?? 0, format: "currency", caption: top?.name ?? "—" },
@@ -719,9 +733,9 @@ async function buildPayments(intent: ParsedIntent, bounds: DataBounds): Promise<
 
 async function buildPerformance(intent: ParsedIntent, bounds: DataBounds): Promise<BuiltResponse> {
   const analysis = await analyzeRange({ ...intent.range, branchId: intent.branchId });
-  const trend = await monthlyTrend();
-  const pending = await pendingFacts();
-  const customers = await customerFacts({ range: intent.range, bounds, topLimit: 3 });
+  const trend = await monthlyTrend(intent.branchId);
+  const pending = await pendingFacts(intent.branchId);
+  const customers = await customerFacts({ range: intent.range, bounds, branchId: intent.branchId, topLimit: 3 });
   const services = analysis.services;
   const label = rangeLabel(analysis.range.start, analysis.range.end);
 
@@ -839,30 +853,40 @@ function buildUnknown(bounds: DataBounds): BuiltResponse {
 
 /* ───────────────────────────── entry point ───────────────────────────── */
 
-export async function buildResponse(intent: ParsedIntent, bounds: DataBounds): Promise<BuiltResponse> {
-  switch (intent.topic) {
+export async function buildResponse(
+  intent: ParsedIntent,
+  bounds: DataBounds,
+  branchScope: string | null = null,
+): Promise<BuiltResponse> {
+  // Defence in depth: for a branch manager, every query below is forced to the
+  // trusted branch id even if the intent parser produced something unexpected.
+  const scoped: ParsedIntent = branchScope
+    ? { ...intent, branchId: branchScope, branchIds: [branchScope] }
+    : intent;
+
+  switch (scoped.topic) {
     case "revenue": {
-      const trend = await monthlyTrend();
-      return buildRevenue(intent, bounds, trend);
+      const trend = await monthlyTrend(scoped.branchId);
+      return buildRevenue(scoped, bounds, trend);
     }
     case "compare":
-      return buildCompare(intent, bounds);
+      return buildCompare(scoped, bounds);
     case "orders":
-      return buildOrders(intent, bounds);
+      return buildOrders(scoped, bounds);
     case "completion":
-      return buildCompletion(intent, bounds);
+      return buildCompletion(scoped, bounds);
     case "pending":
-      return buildPending(intent, bounds);
+      return buildPending(scoped, bounds);
     case "customers":
-      return buildCustomers(intent, bounds);
+      return buildCustomers(scoped, bounds);
     case "services":
-      return buildServices(intent, bounds);
+      return buildServices(scoped, bounds);
     case "branches":
-      return buildBranches(intent, bounds);
+      return buildBranches(scoped, bounds);
     case "payments":
-      return buildPayments(intent, bounds);
+      return buildPayments(scoped, bounds);
     case "performance":
-      return buildPerformance(intent, bounds);
+      return buildPerformance(scoped, bounds);
     default:
       return buildUnknown(bounds);
   }

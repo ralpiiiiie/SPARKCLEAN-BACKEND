@@ -542,7 +542,7 @@ export const baReports = pgTable("ba_reports", {
 
 /* ── Relations ── */
 
-export const adminRoleEnum = pgEnum("admin_role", ["admin", "analyst"]);
+export const adminRoleEnum = pgEnum("admin_role", ["admin", "analyst", "manager"]);
 
 export const adminUsers = pgTable("admin_users", {
   id: serial("id").primaryKey(),
@@ -550,8 +550,19 @@ export const adminUsers = pgTable("admin_users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   role: adminRoleEnum("role").notNull().default("analyst"),
+  /**
+   * Trusted branch assignment. Required for the `manager` role and ignored for
+   * global administrators. The application never accepts this from the client
+   * when deciding what data to return.
+   */
+  branchId: text("branch_id").references(() => branches.id, { onDelete: "restrict" }),
+  /** Incremented on logout so previously issued JWTs stop working immediately. */
+  tokenVersion: integer("token_version").notNull().default(0),
   ...timestamps,
-}, (t) => [index("admin_users_email_idx").on(t.email)]);
+}, (t) => [
+  index("admin_users_email_idx").on(t.email),
+  index("admin_users_branch_idx").on(t.branchId),
+]);
 
 export const chatConversations = pgTable(
   "chat_conversations",
@@ -561,6 +572,9 @@ export const chatConversations = pgTable(
       .notNull()
       .references(() => adminUsers.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("New conversation"),
+    /** Snapshot of the role/branch at creation time, for audits and defence in depth. */
+    roleSnapshot: text("role_snapshot"),
+    branchIdSnapshot: text("branch_id_snapshot"),
     ...timestamps,
   },
   (t) => [index("chat_conversations_admin_idx").on(t.adminId)],
@@ -580,7 +594,8 @@ export const chatMessages = pgTable(
   (t) => [index("chat_messages_conversation_idx").on(t.conversationId)],
 );
 
-export const adminUsersRelations = relations(adminUsers, ({ many }) => ({
+export const adminUsersRelations = relations(adminUsers, ({ one, many }) => ({
+  branch: one(branches, { fields: [adminUsers.branchId], references: [branches.id] }),
   conversations: many(chatConversations),
 }));
 

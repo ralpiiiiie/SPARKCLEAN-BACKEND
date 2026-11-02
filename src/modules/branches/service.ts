@@ -1,4 +1,4 @@
-import { asc, count, desc, eq, ilike, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { branches } from "../../db/schema/index.js";
 import type { ListQuery } from "../../utils/params.js";
@@ -13,14 +13,20 @@ const sortable = {
   manager: branches.manager,
 } as const;
 
-export async function listBranches(query: ListQuery) {
-  const where = query.search
+/** @param branchScope Managers only ever see their own branch row. */
+export async function listBranches(query: ListQuery, branchScope: string | null = null) {
+  const search = query.search
     ? or(
         ilike(branches.name, `%${query.search}%`),
         ilike(branches.city, `%${query.search}%`),
         ilike(branches.manager, `%${query.search}%`),
       )
     : undefined;
+  const where = branchScope
+    ? search
+      ? and(eq(branches.id, branchScope), search)
+      : eq(branches.id, branchScope)
+    : search;
   const column = sortable[(query.sort ?? "id") as keyof typeof sortable] ?? branches.id;
 
   const [rows, totalRows] = await Promise.all([
@@ -37,7 +43,8 @@ export async function listBranches(query: ListQuery) {
   return { data: rows, ...pageMeta(totalRows[0].value, query.page, query.pageSize) };
 }
 
-export async function getBranch(id: string) {
+export async function getBranch(id: string, branchScope: string | null = null) {
+  if (branchScope && id !== branchScope) throw ApiError.notFound("Branch not found");
   const [row] = await db.select().from(branches).where(eq(branches.id, id));
   if (!row) throw ApiError.notFound("Branch not found");
   return row;

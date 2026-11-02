@@ -15,6 +15,13 @@
       "when": 1793630138754,
       "tag": "0001_left_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793636836147,
+      "tag": "0002_branch_roles_and_scoped_conversations",
+      "breakpoints": true
     }
   ]
 }

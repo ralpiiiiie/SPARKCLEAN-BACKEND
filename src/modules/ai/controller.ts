@@ -9,6 +9,9 @@ export async function chat(req: Request, res: Response) {
     message: body.message,
     conversationId: body.conversationId,
     pageContext: body.pageContext,
+    role: req.user!.role,
+    branchId: req.user!.branchId,
+    branchName: req.user!.branchName,
   });
   res.json({ data: result });
 }

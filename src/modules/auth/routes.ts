@@ -8,7 +8,14 @@ export const authRouter = Router();
 
 authRouter.post("/login", validate({ body: loginSchema }), controller.login);
 authRouter.get("/me", requireAuth, validate({ query: meSchema }), controller.me);
+authRouter.post("/logout", requireAuth, controller.signOut);
 
 // Admin-only user management.
 authRouter.get("/users", requireAuth, requireRole("admin"), controller.list);
-authRouter.post("/users", requireAuth, requireRole("admin"), validate({ body: createUserSchema }), controller.create);
+authRouter.post(
+  "/users",
+  requireAuth,
+  requireRole("admin"),
+  validate({ body: createUserSchema }),
+  controller.create,
+);

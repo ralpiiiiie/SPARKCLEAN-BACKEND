@@ -15,7 +15,9 @@
     "db:migrate:prod": "node dist/db/migrate.js",
     "db:seed": "tsx src/db/seed/index.ts",
     "db:seed:prod": "cross-env ALLOW_SEED=true node dist/db/seed/index.js",
+    "db:seed:managers": "node scripts/seed-managers.mjs",
     "db:push": "drizzle-kit push",
+    "verify:isolation": "node scripts/verify-isolation.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

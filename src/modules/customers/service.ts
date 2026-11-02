@@ -25,6 +25,7 @@ const baseQuery = () =>
       phone: customers.phone,
       email: customers.email,
       address: customers.address,
+      branchId: customers.branchId,
       branch: branches.name,
       type: customers.type,
       joinDate: customers.joinDate,
@@ -33,9 +34,11 @@ const baseQuery = () =>
     .from(customers)
     .innerJoin(branches, eq(customers.branchId, branches.id));
 
-export async function listCustomers(query: CustomerQuery) {
+/** @param branchScope Manager's trusted branch; admins pass the requested filter. */
+export async function listCustomers(query: CustomerQuery, branchScope: string | null = null) {
   const conditions = [];
-  if (query.branchId) conditions.push(eq(customers.branchId, query.branchId));
+  if (branchScope) conditions.push(eq(customers.branchId, branchScope));
+  else if (query.branchId) conditions.push(eq(customers.branchId, query.branchId));
   if (query.type) conditions.push(eq(customers.type, query.type));
   if (query.loyaltyTier) conditions.push(eq(customers.loyaltyTier, query.loyaltyTier));
   if (query.search) {
@@ -63,28 +66,41 @@ export async function listCustomers(query: CustomerQuery) {
   return { data: rows, ...pageMeta(totalRows[0].value, query.page, query.pageSize) };
 }
 
-export async function getCustomer(id: string) {
+export async function getCustomer(id: string, branchScope: string | null = null) {
   const [row] = await baseQuery().where(eq(customers.id, id));
   if (!row) throw ApiError.notFound("Customer not found");
+  if (branchScope && row.branchId !== branchScope) throw ApiError.notFound("Customer not found");
   return row;
 }
 
-export async function createCustomer(input: z.infer<typeof customerCreateSchema>) {
+export async function createCustomer(
+  input: z.infer<typeof customerCreateSchema>,
+  branchScope: string | null = null,
+) {
+  if (branchScope && input.branchId !== branchScope) {
+    throw new ApiError(403, "BRANCH_FORBIDDEN", "You can only create customers for your assigned branch.");
+  }
   const id = await nextId("customers", "id", "CUS", 4);
   const [created] = await db.insert(customers).values({ ...input, id }).returning();
-  return getCustomer(created.id);
+  return getCustomer(created.id, branchScope);
 }
 
 export async function updateCustomer(
   id: string,
   patch: Partial<z.infer<typeof customerCreateSchema>>,
+  branchScope: string | null = null,
 ) {
+  await getCustomer(id, branchScope);
+  if (branchScope && patch.branchId && patch.branchId !== branchScope) {
+    throw new ApiError(403, "BRANCH_FORBIDDEN", "You cannot move a record to another branch.");
+  }
   const [updated] = await db.update(customers).set(patch).where(eq(customers.id, id)).returning();
   if (!updated) throw ApiError.notFound("Customer not found");
-  return getCustomer(id);
+  return getCustomer(id, branchScope);
 }
 
-export async function deleteCustomer(id: string) {
+export async function deleteCustomer(id: string, branchScope: string | null = null) {
+  await getCustomer(id, branchScope);
   const [deleted] = await db
     .delete(customers)
     .where(eq(customers.id, id))

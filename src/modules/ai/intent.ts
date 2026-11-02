@@ -49,6 +49,8 @@ export interface ParsedIntent {
   compare?: { current: DateRange; previous: DateRange };
   branchId: string | null;
   branchName: string | null;
+  /** Every branch named in the question (deduplicated). Used for access checks. */
+  branchIds: string[];
   explicitPeriod: boolean;
   preset: Preset | "explicit" | "context";
   monthKey: string | null;
@@ -170,14 +172,30 @@ function precedingRange(range: DateRange): DateRange {
   return { start: isoAddDays(end, -(days - 1)), end };
 }
 
-function detectBranch(text: string, branches: BranchRef[]): BranchRef | null {
+/** All branches referenced by name or city, in the order they appear. */
+export function detectBranches(text: string, branches: BranchRef[]): BranchRef[] {
   const sorted = [...branches].sort((a, b) => b.name.length - a.name.length);
+  const found: Array<{ branch: BranchRef; at: number }> = [];
   for (const branch of sorted) {
     const name = branch.name.toLowerCase();
     const city = branch.city.toLowerCase();
-    if (text.includes(name) || text.includes(city)) return branch;
+    // Also recognise the branch code (BR002, BR004, …) so a manager cannot
+    // sidestep the refusal rules by naming another branch by id.
+    const idMatch = new RegExp(`\\b${branch.id.toLowerCase()}\\b`).exec(text);
+    const at = Math.min(
+      name && text.indexOf(name) !== -1 ? text.indexOf(name) : Number.POSITIVE_INFINITY,
+      city && text.indexOf(city) !== -1 ? text.indexOf(city) : Number.POSITIVE_INFINITY,
+      idMatch ? idMatch.index : Number.POSITIVE_INFINITY,
+    );
+    if (Number.isFinite(at)) found.push({ branch, at });
   }
-  return null;
+  // Drop a shorter name that is part of a longer match (e.g. "Cebu City" vs "Cebu").
+  return found
+    .sort((a, b) => a.at - b.at)
+    .filter((entry, index, all) =>
+      all.every((other, otherIndex) => otherIndex === index || !other.branch.name.includes(entry.branch.name)),
+    )
+    .map((entry) => entry.branch);
 }
 
 function detectTopic(text: string): Topic {
@@ -382,8 +400,11 @@ export function parseIntent(
 ): ParsedIntent {
   const text = ` ${rawQuestion.toLowerCase().replace(/\s+/g, " ")} `;
 
-  const branch = detectBranch(text, branches);
-  const topic = detectTopic(text);
+  const mentioned = detectBranches(text, branches);
+  const branch = mentioned.length === 1 ? mentioned[0] : null;
+  const branchIds = mentioned.map((b) => b.id);
+  // Naming two or more branches is a branch comparison regardless of the wording.
+  const topic = mentioned.length > 1 ? "branches" : detectTopic(text);
   const flags = {
     bestMonth: has(text, "highest", "best", "peak", "top month", "strongest", "maximum", "max "),
     worstMonth: has(text, "lowest", "worst", "weakest", "minimum", "slowest"),
@@ -403,6 +424,7 @@ export function parseIntent(
       range: clampRange(isoRange, bounds),
       branchId: branch?.id ?? null,
       branchName: branch?.name ?? null,
+      branchIds,
       explicitPeriod: true,
       preset: "explicit",
       monthKey: null,
@@ -424,6 +446,7 @@ export function parseIntent(
       compare,
       branchId: branch?.id ?? null,
       branchName: branch?.name ?? null,
+      branchIds,
       explicitPeriod: true,
       preset: "explicit",
       monthKey: compare.current.start.slice(0, 7),
@@ -438,6 +461,7 @@ export function parseIntent(
       range: clampRange(monthRange(monthKey, bounds), bounds),
       branchId: branch?.id ?? null,
       branchName: branch?.name ?? null,
+      branchIds,
       explicitPeriod: true,
       preset: "explicit",
       monthKey,
@@ -452,6 +476,7 @@ export function parseIntent(
       range: resolvePreset(preset, bounds),
       branchId: branch?.id ?? null,
       branchName: branch?.name ?? null,
+      branchIds,
       explicitPeriod: true,
       preset,
       monthKey: null,
@@ -467,6 +492,7 @@ export function parseIntent(
       range: context.lastRange,
       branchId: branch?.id ?? null,
       branchName: branch?.name ?? null,
+      branchIds,
       explicitPeriod: false,
       preset: "context",
       monthKey: null,
@@ -488,6 +514,7 @@ export function parseIntent(
     range: resolvePreset(wantsAllTime ? "all_time" : "this_month", bounds),
     branchId: branch?.id ?? null,
     branchName: branch?.name ?? null,
+    branchIds,
     explicitPeriod: false,
     preset: wantsAllTime ? "all_time" : "this_month",
     monthKey: null,

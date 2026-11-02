@@ -8,6 +8,8 @@ import { env } from "./config/env.js";
 import { pool } from "./db/client.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { notFound } from "./middleware/notFound.js";
+import { requireAuth } from "./middleware/auth.js";
+import { managerAccessGuard } from "./middleware/branchScope.js";
 import { authRouter } from "./modules/auth/routes.js";
 import { aiRouter } from "./modules/ai/routes.js";
 import { branchesRouter } from "./modules/branches/routes.js";
@@ -80,7 +82,19 @@ api.get("/health", async (_req, res) => {
   }
 });
 
+// Authentication endpoints manage their own guards (login must stay public).
 api.use("/auth", authRouter);
+
+// Everything below is private. Never rely on the SPA to hide protected routes:
+// the API itself rejects anonymous callers and branch managers outside their
+// allow-listed scope.
+api.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
+api.use(requireAuth);
+api.use(managerAccessGuard);
+
 api.use("/ai", aiRouter);
 api.use("/dashboard", dashboardRouter);
 api.use("/branches", branchesRouter);

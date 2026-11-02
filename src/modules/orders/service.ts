@@ -25,6 +25,7 @@ const baseQuery = () =>
     .select({
       id: orders.id,
       customerId: orders.customerId,
+      branchId: orders.branchId,
       branch: branches.name,
       serviceId: orders.serviceId,
       kg: orders.kg,
@@ -41,6 +42,7 @@ const baseQuery = () =>
 const serialize = (row: {
   id: string;
   customerId: string;
+  branchId: string;
   branch: string;
   serviceId: string;
   kg: number;
@@ -52,9 +54,14 @@ const serialize = (row: {
   isPickup: boolean;
 }) => ({ ...row, amount: toNumber(row.amount) });
 
-export async function listOrders(query: OrderQuery) {
+/**
+ * @param branchScope For a branch manager this is their assigned branch and is
+ *   always applied. Admins pass `query.branchId` (or null for all branches).
+ */
+export async function listOrders(query: OrderQuery, branchScope: string | null = null) {
   const conditions: SQL[] = [];
-  if (query.branchId) conditions.push(eq(orders.branchId, query.branchId));
+  if (branchScope) conditions.push(eq(orders.branchId, branchScope));
+  else if (query.branchId) conditions.push(eq(orders.branchId, query.branchId));
   if (query.serviceId) conditions.push(eq(orders.serviceId, query.serviceId));
   if (query.customerId) conditions.push(eq(orders.customerId, query.customerId));
   if (query.status) conditions.push(eq(orders.status, query.status));
@@ -88,25 +95,42 @@ export async function listOrders(query: OrderQuery) {
   };
 }
 
-export async function getOrder(id: string) {
+/**
+ * Fetch one order. When `branchScope` is set, an order from another branch is
+ * reported as 404 so its existence is never disclosed.
+ */
+export async function getOrder(id: string, branchScope: string | null = null) {
   const [row] = await baseQuery().where(eq(orders.id, id));
   if (!row) throw ApiError.notFound("Order not found");
+  if (branchScope && row.branchId !== branchScope) throw ApiError.notFound("Order not found");
   return serialize(row);
 }
 
-export async function createOrder(input: z.infer<typeof orderCreateSchema>) {
+export async function createOrder(
+  input: z.infer<typeof orderCreateSchema>,
+  branchScope: string | null = null,
+) {
+  if (branchScope && input.branchId !== branchScope) {
+    throw new ApiError(403, "BRANCH_FORBIDDEN", "You can only create orders for your assigned branch.");
+  }
   const id = await nextId("orders", "id", "ORD", 5);
   const [created] = await db
     .insert(orders)
     .values({ ...input, id, amount: String(input.amount) })
     .returning({ id: orders.id });
-  return getOrder(created.id);
+  return getOrder(created.id, branchScope);
 }
 
 export async function updateOrder(
   id: string,
   patch: Partial<z.infer<typeof orderCreateSchema>>,
+  branchScope: string | null = null,
 ) {
+  // Ownership check happens before any write.
+  await getOrder(id, branchScope);
+  if (branchScope && patch.branchId && patch.branchId !== branchScope) {
+    throw new ApiError(403, "BRANCH_FORBIDDEN", "You cannot move a record to another branch.");
+  }
   const { amount, ...rest } = patch;
   const values = {
     ...rest,
@@ -116,10 +140,11 @@ export async function updateOrder(
     id: orders.id,
   });
   if (!updated) throw ApiError.notFound("Order not found");
-  return getOrder(id);
+  return getOrder(id, branchScope);
 }
 
-export async function deleteOrder(id: string) {
+export async function deleteOrder(id: string, branchScope: string | null = null) {
+  await getOrder(id, branchScope);
   const [deleted] = await db.delete(orders).where(eq(orders.id, id)).returning({ id: orders.id });
   if (!deleted) throw ApiError.notFound("Order not found");
   return { id: deleted.id, deleted: true };

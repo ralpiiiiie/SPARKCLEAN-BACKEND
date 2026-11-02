@@ -10,7 +10,7 @@
  * Customers are reduced to { id?, name, orders, revenue, lastOrderDate }
  * — never phone, email or address.
  */
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { branches, customers, orders, services } from "../../db/schema/index.js";
 import { toNumber } from "../../utils/numbers.js";
@@ -22,6 +22,8 @@ export interface DateRange {
 
 export interface RangeInput extends DateRange {
   branchId?: string | null;
+  /** Admin-only multi-branch comparison. Never populated for managers. */
+  branchIds?: string[] | null;
 }
 
 const MS_DAY = 86_400_000;
@@ -85,14 +87,15 @@ export interface DataBounds {
   totalOrders: number;
 }
 
-export async function getDataBounds(): Promise<DataBounds> {
+export async function getDataBounds(branchId?: string | null): Promise<DataBounds> {
   const [row] = await db
     .select({
       min: sql<string | null>`min(${orders.orderDate})`,
       max: sql<string | null>`max(${orders.orderDate})`,
       count: sql<number>`count(*)::int`,
     })
-    .from(orders);
+    .from(orders)
+    .where(branchId ? eq(orders.branchId, branchId) : undefined);
 
   const today = new Date().toISOString().slice(0, 10);
   const min = row?.min ?? today;
@@ -223,7 +226,11 @@ interface RangeOrder {
 
 async function fetchRange(input: RangeInput): Promise<RangeOrder[]> {
   const conditions = [gte(orders.orderDate, input.start), lte(orders.orderDate, input.end)];
-  if (input.branchId) conditions.push(eq(orders.branchId, input.branchId));
+  if (input.branchIds && input.branchIds.length > 0) {
+    conditions.push(inArray(orders.branchId, input.branchIds));
+  } else if (input.branchId) {
+    conditions.push(eq(orders.branchId, input.branchId));
+  }
 
   const rows = await db
     .select({
@@ -425,8 +432,8 @@ export interface MonthRow {
   aov: number;
 }
 
-/** Full monthly revenue/order series (billable orders only). */
-export async function monthlyTrend(): Promise<MonthRow[]> {
+/** Full monthly revenue/order series (billable orders only), optionally scoped to a branch. */
+export async function monthlyTrend(branchId?: string | null): Promise<MonthRow[]> {
   const rows = await db
     .select({
       key: sql<string>`to_char(${orders.orderDate}, 'YYYY-MM')`,
@@ -434,7 +441,12 @@ export async function monthlyTrend(): Promise<MonthRow[]> {
       revenue: sql<string>`coalesce(sum(${orders.amount}), 0)`,
     })
     .from(orders)
-    .where(sql`${orders.status} <> 'Cancelled'`)
+    .where(
+      and(
+        sql`${orders.status} <> 'Cancelled'`,
+        branchId ? eq(orders.branchId, branchId) : undefined,
+      ),
+    )
     .groupBy(sql`to_char(${orders.orderDate}, 'YYYY-MM')`)
     .orderBy(sql`to_char(${orders.orderDate}, 'YYYY-MM')`);
 
@@ -473,16 +485,20 @@ export interface CustomerFacts {
 export async function customerFacts(options: {
   range: DateRange;
   bounds: DataBounds;
+  branchId?: string | null;
   dormantDays?: number;
   topLimit?: number;
 }): Promise<CustomerFacts> {
-  const { range, bounds } = options;
+  const { range, bounds, branchId } = options;
   const dormantDays = options.dormantDays ?? 90;
   const topLimit = options.topLimit ?? 5;
   const dormantCutoff = isoAddDays(bounds.max, -dormantDays);
 
   const [allCustomers, orderAgg, recentAgg] = await Promise.all([
-    db.select({ id: customers.id }).from(customers),
+    db
+      .select({ id: customers.id })
+      .from(customers)
+      .where(branchId ? eq(customers.branchId, branchId) : undefined),
     db
       .select({
         customerId: orders.customerId,
@@ -493,7 +509,12 @@ export async function customerFacts(options: {
       })
       .from(orders)
       .innerJoin(customers, eq(orders.customerId, customers.id))
-      .where(sql`${orders.status} <> 'Cancelled'`)
+      .where(
+        and(
+          sql`${orders.status} <> 'Cancelled'`,
+          branchId ? eq(orders.branchId, branchId) : undefined,
+        ),
+      )
       .groupBy(orders.customerId, customers.name),
     db
       .select({
@@ -506,6 +527,7 @@ export async function customerFacts(options: {
           gte(orders.orderDate, range.start),
           lte(orders.orderDate, range.end),
           sql`${orders.status} <> 'Cancelled'`,
+          branchId ? eq(orders.branchId, branchId) : undefined,
         ),
       )
       .groupBy(orders.customerId),
@@ -528,7 +550,13 @@ export async function customerFacts(options: {
   const newCustomers = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(customers)
-    .where(and(gte(customers.joinDate, range.start), lte(customers.joinDate, range.end)))
+    .where(
+      and(
+        gte(customers.joinDate, range.start),
+        lte(customers.joinDate, range.end),
+        branchId ? eq(customers.branchId, branchId) : undefined,
+      ),
+    )
     .then((rows) => rows[0]?.n ?? 0);
 
   const topCustomers = [...orderAgg]
@@ -565,7 +593,7 @@ export interface PendingFacts {
   oldestPendingDate: string | null;
 }
 
-export async function pendingFacts(): Promise<PendingFacts> {
+export async function pendingFacts(branchId?: string | null): Promise<PendingFacts> {
   const rows = await db
     .select({
       status: orders.status,
@@ -573,7 +601,12 @@ export async function pendingFacts(): Promise<PendingFacts> {
       oldest: sql<string | null>`min(${orders.orderDate})`,
     })
     .from(orders)
-    .where(sql`${orders.status} in ('Received', 'Washing', 'Ready')`)
+    .where(
+      and(
+        sql`${orders.status} in ('Received', 'Washing', 'Ready')`,
+        branchId ? eq(orders.branchId, branchId) : undefined,
+      ),
+    )
     .groupBy(orders.status);
 
   const byStatus = new Map(rows.map((row) => [row.status, row]));
@@ -616,7 +649,17 @@ export async function analyzeRange(input: RangeInput): Promise<RangeAnalysis> {
   };
 }
 
-/** Branch list for name → id resolution without exposing anything else. */
-export async function listBranchRefs(): Promise<Array<{ id: string; name: string; city: string }>> {
-  return db.select({ id: branches.id, name: branches.name, city: branches.city }).from(branches);
+/**
+ * Branch list for name → id resolution without exposing anything else.
+ * The AI always passes `null` (all branch names are public store locations) so
+ * it can *detect* a cross-branch question; the response builder then refuses or
+ * filters before any business data is read.
+ */
+export async function listBranchRefs(
+  branchId?: string | null,
+): Promise<Array<{ id: string; name: string; city: string }>> {
+  return db
+    .select({ id: branches.id, name: branches.name, city: branches.city })
+    .from(branches)
+    .where(branchId ? eq(branches.id, branchId) : undefined);
 }

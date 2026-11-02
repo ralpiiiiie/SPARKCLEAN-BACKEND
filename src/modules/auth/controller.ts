@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
-import { login as loginService, getMe, listUsers, createUser } from "./service.js";
-import { ApiError } from "../../utils/errors.js";
+import { login as loginService, getMe, listUsers, createUser, logout } from "./service.js";
+import type { CreateUserInput } from "./service.js";
 
 export async function login(req: Request, res: Response) {
   try {
@@ -14,6 +14,12 @@ export async function login(req: Request, res: Response) {
     }
     throw error;
   }
+}
+
+/** Revoke the current session token (all tokens for this account). */
+export async function signOut(req: Request, res: Response) {
+  await logout(req.user!.id);
+  res.status(204).end();
 }
 
 export async function me(req: Request, res: Response) {
@@ -31,7 +37,7 @@ export async function list(req: Request, res: Response) {
 }
 
 export async function create(req: Request, res: Response) {
-  const body = req.valid.body as { username: string; email: string; password: string; role: "admin" | "analyst" };
+  const body = req.valid.body as CreateUserInput;
   const user = await createUser(body);
   res.status(201).json({ data: user });
 }
