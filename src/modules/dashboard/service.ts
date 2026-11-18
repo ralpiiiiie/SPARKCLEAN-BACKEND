@@ -8,28 +8,49 @@ import {
 import { round2, toNumber } from "../../utils/numbers.js";
 import { descriptive, recentOrders } from "../analytics/service.js";
 
+/** Safely execute a query, returning a default value on failure (e.g., missing table). */
+async function safeQuery<T>(query: Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await query;
+  } catch (error) {
+    // Log but don't throw — allows dashboard to degrade gracefully if a table is missing
+    // (e.g., production DB on older schema). The error is logged for diagnostics.
+    console.warn("Dashboard query failed, using fallback:", error instanceof Error ? error.message : error);
+    return fallback;
+  }
+}
+
 export async function dashboard() {
   const [overview, paymentRows, usageRows, campaignRows, latestOrders] = await Promise.all([
     descriptive(),
-    db
-      .select({
-        method: payments.method,
-        value: sql<number>`sum(${payments.amount})::float`,
-      })
-      .from(payments)
-      .groupBy(payments.method),
-    db
-      .select()
-      .from(machineUsageLog)
-      .orderBy(machineUsageLog.day),
-    db
-      .select({
-        channel: marketingCampaigns.channel,
-        leads: sql<number>`sum(${marketingCampaigns.leads})::int`,
-        cost: sql<number>`sum(${marketingCampaigns.cost})::float`,
-      })
-      .from(marketingCampaigns)
-      .groupBy(marketingCampaigns.channel),
+    safeQuery(
+      db
+        .select({
+          method: payments.method,
+          value: sql<number>`sum(${payments.amount})::float`,
+        })
+        .from(payments)
+        .groupBy(payments.method),
+      [],
+    ),
+    safeQuery(
+      db
+        .select()
+        .from(machineUsageLog)
+        .orderBy(machineUsageLog.day),
+      [],
+    ),
+    safeQuery(
+      db
+        .select({
+          channel: marketingCampaigns.channel,
+          leads: sql<number>`sum(${marketingCampaigns.leads})::int`,
+          cost: sql<number>`sum(${marketingCampaigns.cost})::float`,
+        })
+        .from(marketingCampaigns)
+        .groupBy(marketingCampaigns.channel),
+      [],
+    ),
     recentOrders(8),
   ]);
 
