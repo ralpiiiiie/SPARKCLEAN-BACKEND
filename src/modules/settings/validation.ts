@@ -1,9 +1,11 @@
 import { z } from "zod";
 
 export const settingsUpdateSchema = z.object({
-  rushCostPerLoad: z.number().nonnegative().optional(),
-  storageCostPerLoad: z.number().nonnegative().optional(),
-  currency: z.string().min(1).max(8).optional(),
-  units: z.string().min(1).max(24).optional(),
-  validationMonths: z.number().int().min(1).max(12).optional(),
+  currency: z.string().trim().min(1, "Currency symbol is required.").max(4).optional(),
+  machineHoursDefault: z.coerce
+    .number()
+    .int("Machine hours must be a whole number.")
+    .min(200, "Choose at least 200 machine hours.")
+    .max(600, "Choose at most 600 machine hours.")
+    .optional(),
 });

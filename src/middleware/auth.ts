@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { eq } from "drizzle-orm";
 import { env } from "../config/env.js";
 import { db } from "../db/client.js";
-import { adminUsers, branches } from "../db/schema/index.js";
+import { adminUsers } from "../db/schema/index.js";
 
 export type AuthRole = "admin" | "analyst" | "manager";
 
@@ -14,9 +14,6 @@ export interface AuthUser {
   email: string;
   role: AuthRole;
   roleLevel: number;
-  /** Trusted branch assignment loaded from the database, never from the client. */
-  branchId: string | null;
-  branchName: string | null;
 }
 
 declare global {
@@ -39,9 +36,9 @@ export function roleLevelOf(role: AuthRole): number {
 }
 
 /**
- * Verify a Bearer JWT, then re-load the account from the database so role,
- * branch assignment and token revocation are always server-authoritative.
- * A token only proves identity; it never carries permissions on its own.
+ * Verify a Bearer JWT, then re-load the account from the database so role and
+ * token revocation are always server-authoritative. A token only proves
+ * identity; it never carries permissions on its own.
  */
 export async function requireAuth(
   req: Request,
@@ -78,12 +75,9 @@ export async function requireAuth(
         username: adminUsers.username,
         email: adminUsers.email,
         role: adminUsers.role,
-        branchId: adminUsers.branchId,
-        branchName: branches.name,
         tokenVersion: adminUsers.tokenVersion,
       })
       .from(adminUsers)
-      .leftJoin(branches, eq(adminUsers.branchId, branches.id))
       .where(eq(adminUsers.id, payload.id))
       .limit(1);
 
@@ -104,24 +98,12 @@ export async function requireAuth(
       return;
     }
 
-    if (row.role === "manager" && !row.branchId) {
-      res.status(403).json({
-        error: {
-          code: "BRANCH_NOT_ASSIGNED",
-          message: "This branch manager account has no branch assignment. Contact an administrator.",
-        },
-      });
-      return;
-    }
-
     req.user = {
       id: row.id,
       username: row.username,
       email: row.email,
       role: row.role,
       roleLevel: roleLevelOf(row.role),
-      branchId: row.branchId ?? null,
-      branchName: row.branchName ?? null,
     };
     next();
   } catch (error) {

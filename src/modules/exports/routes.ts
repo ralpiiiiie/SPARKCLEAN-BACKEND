@@ -1,5 +1,4 @@
-import { Router } from "express";
-import type { Request, Response } from "express";
+import { Router, type Request, type Response } from "express";
 import * as service from "./service.js";
 
 async function send(entity: string, res: Response): Promise<void> {
@@ -15,8 +14,5 @@ const entityOf = (value: string | string[]): string =>
   Array.isArray(value) ? (value[0] ?? "") : value;
 
 exportsRouter.get("/:entity.csv", async (req: Request, res: Response) => {
-  await send(entityOf(req.params.entity), res);
-});
-exportsRouter.get("/:entity", async (req: Request, res: Response) => {
   await send(entityOf(req.params.entity), res);
 });

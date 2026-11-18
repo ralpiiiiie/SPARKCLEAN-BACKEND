@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1793257744621,
-      "tag": "0000_stiff_sinister_six",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1793630138754,
-      "tag": "0001_left_millenium_guard",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1793636836147,
-      "tag": "0002_branch_roles_and_scoped_conversations",
+      "when": 1793960325060,
+      "tag": "0000_small_longshot",
       "breakpoints": true
     }
   ]

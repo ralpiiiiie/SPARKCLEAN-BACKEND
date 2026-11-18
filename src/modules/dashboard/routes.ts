@@ -1,8 +1,8 @@
-import { Router } from "express";
-import { validate } from "../../middleware/validate.js";
-import { dashboardQuerySchema } from "./validation.js";
-import * as controller from "./controller.js";
+import { Router, type Request, type Response } from "express";
+import { dashboard } from "./service.js";
 
 export const dashboardRouter = Router();
 
-dashboardRouter.get("/summary", validate({ query: dashboardQuerySchema }), controller.summary);
+dashboardRouter.get("/", async (_req: Request, res: Response) => {
+  res.json(await dashboard());
+});

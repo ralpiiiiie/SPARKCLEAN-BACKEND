@@ -15,10 +15,11 @@
     "db:migrate:prod": "node dist/db/migrate.js",
     "db:seed": "tsx src/db/seed/index.ts",
     "db:seed:prod": "cross-env ALLOW_SEED=true node dist/db/seed/index.js",
-    "db:seed:managers": "node scripts/seed-managers.mjs",
+    "db:reset": "cross-env RESET_DB=true tsx src/db/reset.ts",
+    "db:reset:prod": "cross-env ALLOW_SEED=true RESET_DB=true tsx src/db/reset.ts",
     "db:push": "drizzle-kit push",
-    "verify:isolation": "node scripts/verify-isolation.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "tsx --test tests/forecast.test.ts"
   },
   "dependencies": {
     "@types/node": "^24.5.2",

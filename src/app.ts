@@ -9,32 +9,19 @@ import { pool } from "./db/client.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { notFound } from "./middleware/notFound.js";
 import { requireAuth } from "./middleware/auth.js";
-import { managerAccessGuard } from "./middleware/branchScope.js";
 import { authRouter } from "./modules/auth/routes.js";
-import { aiRouter } from "./modules/ai/routes.js";
-import { branchesRouter } from "./modules/branches/routes.js";
-import { plantsRouter } from "./modules/plants/routes.js";
-import { servicesRouter } from "./modules/services/routes.js";
-import { customersRouter } from "./modules/customers/routes.js";
-import { ordersRouter } from "./modules/orders/routes.js";
-import { demandRouter } from "./modules/demand/routes.js";
-import { campaignsRouter } from "./modules/campaigns/routes.js";
-import { deliveriesRouter } from "./modules/deliveries/routes.js";
-import { deliveryCostsRouter } from "./modules/deliveryCosts/routes.js";
-import { settingsRouter } from "./modules/settings/routes.js";
+import { analyticsRouter } from "./modules/analytics/routes.js";
 import { dashboardRouter } from "./modules/dashboard/routes.js";
-import { analyticsRouter } from "./modules/analytics/overview.routes.js";
-import { notesRouter } from "./modules/analytics/notes.routes.js";
-import { savedViewsRouter } from "./modules/analytics/savedViews.routes.js";
-import { forecastRunsRouter } from "./modules/analytics/forecastRuns.routes.js";
-import { modelOverridesRouter } from "./modules/analytics/modelOverrides.routes.js";
-import { costAssumptionsRouter } from "./modules/analytics/costAssumptions.routes.js";
-import { scenariosRouter } from "./modules/analytics/scenarios.routes.js";
-import { scheduleItemsRouter } from "./modules/analytics/scheduleItems.routes.js";
-import { procedureRunsRouter } from "./modules/ba/procedureRuns.routes.js";
-import { recommendationsRouter } from "./modules/ba/recommendations.routes.js";
-import { reportsRouter } from "./modules/ba/reports.routes.js";
 import { exportsRouter } from "./modules/exports/routes.js";
+import {
+  customersRouter,
+  machineUsageRouter,
+  marketingRouter,
+  ordersRouter,
+  paymentsRouter,
+  servicesRouter,
+} from "./modules/records/routes.js";
+import { settingsRouter } from "./modules/settings/routes.js";
 
 export const app = express();
 
@@ -55,12 +42,15 @@ app.use(express.json({ limit: "2mb" }));
 app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(compression());
 app.set("trust proxy", env.NODE_ENV === "production" ? 1 : false);
-app.use("/api", rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 300,
-  standardHeaders: true,
-  legacyHeaders: false
-}));
+app.use(
+  "/api",
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 600,
+    standardHeaders: true,
+    legacyHeaders: false,
+  }),
+);
 
 const api = express.Router();
 
@@ -73,9 +63,9 @@ api.get("/health", async (_req, res) => {
       uptime: Math.round(process.uptime()),
       timestamp: new Date().toISOString(),
     });
-  } catch (error) {
-    res.status(503).json({ 
-      status: "degraded", 
+  } catch {
+    res.status(503).json({
+      status: "degraded",
       database: "down",
       timestamp: new Date().toISOString(),
     });
@@ -85,39 +75,22 @@ api.get("/health", async (_req, res) => {
 // Authentication endpoints manage their own guards (login must stay public).
 api.use("/auth", authRouter);
 
-// Everything below is private. Never rely on the SPA to hide protected routes:
-// the API itself rejects anonymous callers and branch managers outside their
-// allow-listed scope.
+// Everything below is private.
 api.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
 });
 api.use(requireAuth);
-api.use(managerAccessGuard);
 
-api.use("/ai", aiRouter);
 api.use("/dashboard", dashboardRouter);
-api.use("/branches", branchesRouter);
-api.use("/plants", plantsRouter);
-api.use("/services", servicesRouter);
-api.use("/customers", customersRouter);
-api.use("/orders", ordersRouter);
-api.use("/demand", demandRouter);
-api.use("/campaigns", campaignsRouter);
-api.use("/deliveries", deliveriesRouter);
-api.use("/delivery-costs", deliveryCostsRouter);
-api.use("/settings", settingsRouter);
-api.use("/analytics/notes", notesRouter);
-api.use("/analytics/saved-views", savedViewsRouter);
-api.use("/analytics/forecast-runs", forecastRunsRouter);
-api.use("/analytics/model-overrides", modelOverridesRouter);
-api.use("/analytics/cost-assumptions", costAssumptionsRouter);
-api.use("/analytics/scenarios", scenariosRouter);
-api.use("/analytics/schedule-items", scheduleItemsRouter);
 api.use("/analytics", analyticsRouter);
-api.use("/ba/procedure-runs", procedureRunsRouter);
-api.use("/ba/recommendations", recommendationsRouter);
-api.use("/ba/reports", reportsRouter);
+api.use("/customers", customersRouter);
+api.use("/services", servicesRouter);
+api.use("/orders", ordersRouter);
+api.use("/payments", paymentsRouter);
+api.use("/machine-usage", machineUsageRouter);
+api.use("/marketing", marketingRouter);
+api.use("/settings", settingsRouter);
 api.use("/export", exportsRouter);
 
 app.use("/api/v1", api);
@@ -125,7 +98,7 @@ app.use("/api/v1", api);
 app.get("/", (_req, res) => {
   res.json({
     name: "Spark Clean Laundry API",
-    version: "1.0.0",
+    version: "2.0.0",
     docs: "/api/v1/health",
   });
 });
